@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="id"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kuis Rame</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<style>
+:root{--bg:#0f3d3e;--bg2:#0b2e2f;--ch:#f4f1de;--c0:#e63946;--c1:#3a86ff;--c2:#e9a800;--c3:#2a9d8f}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--ch);font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif;display:flex;justify-content:center}
+#app{width:100%;max-width:720px;padding:20px 16px 40px}
+h1{font-size:3rem;margin:.6em 0 .1em;letter-spacing:-1px}
+h2{font-size:1.6rem;line-height:1.3;margin:.5em 0}
+p{line-height:1.5}
+.meta{opacity:.75;margin:.4em 0}
+button,input,textarea,select{font:inherit}
+.b{display:block;width:100%;margin:12px 0;padding:14px;border:0;border-bottom:5px solid #b9b59c;border-radius:12px;background:var(--ch);color:var(--bg2);font-weight:700;font-size:1.1rem;cursor:pointer}
+.b:active{transform:translateY(3px);border-bottom-width:2px}
+.alt{background:var(--c2);border-bottom-color:#a37700}
+.ghost{background:transparent;color:var(--ch);border:2px solid var(--ch)}
+input,textarea,select{width:100%;padding:12px;border-radius:10px;border:2px solid var(--ch);background:var(--bg2);color:var(--ch);margin:8px 0}
+textarea{min-height:170px}
+input[type=file]{border-style:dashed}
+.code{font-size:4rem;font-weight:800;letter-spacing:.2em;text-align:center;background:var(--bg2);border-radius:16px;padding:10px;margin:10px 0}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.chips span{background:var(--bg2);padding:6px 12px;border-radius:99px}
+.bar{height:12px;background:var(--bg2);border-radius:9px;overflow:hidden}
+.bar i{display:block;height:100%;width:100%;background:var(--c2);transition:width .25s linear}
+.opts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.opt{padding:22px 10px;border:0;border-radius:12px;color:#fff;font-weight:700;font-size:1.05rem;cursor:pointer;min-height:96px}
+.opt b{display:block;font-size:1.6rem}
+.c0{background:var(--c0)}.c1{background:var(--c1)}.c2{background:var(--c2);color:#2b2000}.c3{background:var(--c3)}
+.opt.ok{outline:5px solid #fff}.opt.dim{opacity:.35}
+.row{display:flex;justify-content:space-between;background:var(--bg2);padding:10px 14px;border-radius:10px;margin:6px 0}
+.big{font-size:2.4rem;font-weight:800;margin:.3em 0}
+.good{color:#7ee081}.bad{color:#ff8b94}
+pre{background:var(--bg2);padding:10px;border-radius:10px;white-space:pre-wrap}
+summary{cursor:pointer;margin:8px 0}
+#msg{color:#ffd166;min-height:1.4em}
+.sw{width:34px;height:34px;border-radius:50%;border:3px solid transparent;cursor:pointer}
+.chp{padding:8px 12px;border-radius:10px;border:3px solid transparent;background:var(--bg2);color:var(--ch);cursor:pointer}
+.sw.sel,.chp.sel{border-color:#fff}
+canvas{width:100%;display:block;border-radius:12px;touch-action:none;background:#5aa469;margin:6px 0}
+#ov{display:none;position:fixed;inset:0;background:rgba(11,46,47,.97);overflow:auto;padding:24px 16px;z-index:5}
+#ov>*{max-width:688px;margin-left:auto;margin-right:auto}
+#mu{position:fixed;top:10px;right:10px;width:44px;height:44px;border-radius:50%;border:2px solid var(--ch);background:var(--bg2);color:var(--ch);font-size:1.2rem;cursor:pointer;z-index:9}
+</style></head><body><button id="mu" onclick="toggleMute()" aria-label="Suara">🔊</button><div id="app"></div>
+<script>
+const $=s=>document.querySelector(s),app=$('#app'),A=['▲','◆','●','■'];
+let peer,Q=[],cur=-1,dur=20,t0=0,timer,phase='',isHost=false,players={},hostConn,answered=false,myName='',mode='sync',lastSec=-1,sess=null,over=false,joined=false,tries=0,retry,G=0,W=null,myAv=[Math.floor(Math.random()*8),0,0],posT,pid=0,loopG=0;
+const show=h=>app.innerHTML=h;
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const norm=s=>String(s).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu,'').replace(/\s+/g,' ').trim();
+
+/* ---------- Efek suara (dibuat dengan WebAudio, tanpa file) ---------- */
+let ac,mute=false;try{mute=localStorage.kuisMute==='1'}catch(e){}
+function au(){if(!ac){try{ac=new(window.AudioContext||window.webkitAudioContext)()}catch(e){}}if(ac&&ac.state==='suspended')ac.resume()}
+function tone(f,t,d,type,v,f2){
+  if(!ac||mute)return;
+  const o=ac.createOscillator(),g=ac.createGain(),s=ac.currentTime+t;
+  o.type=type||'sine';o.frequency.setValueAtTime(f,s);if(f2)o.frequency.linearRampToValueAtTime(f2,s+d);
+  g.gain.setValueAtTime(0.0001,s);g.gain.linearRampToValueAtTime(v||.14,s+.01);g.gain.exponentialRampToValueAtTime(.001,s+d);
+  o.connect(g);g.connect(ac.destination);o.start(s);o.stop(s+d+.05);
+}
+const sfx={
+  click:()=>tone(600,0,.07,'square',.05),
+  join:()=>{tone(520,0,.08,'triangle');tone(780,.08,.12,'triangle')},
+  start:()=>[392,523,659,784].forEach((f,i)=>tone(f,i*.1,.18,'square',.07)),
+  q:()=>{tone(660,0,.1,'triangle');tone(880,.1,.15,'triangle')},
+  tick:()=>tone(1000,0,.05,'square',.04),
+  ok:()=>[523,659,784,1047].forEach((f,i)=>tone(f,i*.09,.2,'triangle',.14)),
+  bad:()=>tone(220,0,.35,'sawtooth',.09,110),
+  end:()=>[523,659,784,659,784,1047].forEach((f,i)=>tone(f,i*.14,.3,'triangle',.14))
+};
+const play=n=>{au();sfx[n]&&sfx[n]()};
+function toggleMute(){mute=!mute;try{localStorage.kuisMute=mute?'1':'0'}catch(e){}$('#mu').textContent=mute?'🔇':'🔊';au();if(!mute)sfx.click()}
+document.addEventListener('pointerdown',e=>{au();if(e.target.closest&&e.target.closest('button:not(#mu)'))sfx.click()});
+
+function home(){
+  isHost=false;clearInterval(timer);clearTimeout(retry);G++;W=null;clearInterval(posT);if(peer)try{peer.destroy()}catch(e){}players={};
+  const r=loadSess();
+  show(`<h1>Kuis Rame</h1><p>Belajar sambil main. Semua jawab bareng, tapi tiap orang punya satu jawaban.</p><button class=b onclick=teacher()>Saya guru</button><button class="b alt" onclick=student()>Saya murid</button>${r?`<button class="b ghost" onclick=resume()>Lanjutkan kuis: ${esc(r.name)} (${esc(r.code)})</button>`:''}`);
+}
+
+/* ---------- Parser soal ---------- */
+function parse(t){
+  const L=t.split(/\r?\n/).map(s=>s.trim()).filter(Boolean),out=[];let q=null,m;
+  const push=()=>{if(q&&q.q&&q.ans!=null)out.push(q);q=null};
+  for(const l of L){
+    if(m=l.match(/^(?:jawaban|kunci|jwb|answer)\s*[:=.\-]\s*(.+)$/i)){if(q)q.ans=m[1].trim()}
+    else if((m=l.match(/^([A-Da-d])\s*[.)]\s*(.+)$/))&&q&&q.ans==null){if(q.o.length<4)q.o.push(m[2])}
+    else if(m=l.match(/^\d+\s*[.)]\s*(.+)$/)){push();q={q:m[1],o:[],ans:null}}
+    else if(q&&!q.o.length&&q.ans==null)q.q+=' '+l;
+  }
+  push();
+  return out.map(x=>{
+    if(x.o.length>=2){
+      const k=x.ans.trim();let i=-1;
+      if(/^[A-Da-d][.)]?$/.test(k))i='ABCD'.indexOf(k[0].toUpperCase());
+      else i=x.o.findIndex(o=>norm(o)===norm(k));
+      return i>=0&&i<x.o.length?{q:x.q,o:x.o,a:i}:null;
+    }
+    return{q:x.q,o:null,a:x.ans};
+  }).filter(Boolean);
+}
+const check=(x,a)=>x.o?a===x.a:x.a.split('/').some(k=>norm(k)&&norm(k)===norm(a));
+const rightText=x=>x.o?'ABCD'[x.a]+'. '+x.o[x.a]:x.a.split('/')[0];
+
+/* ---------- Guru ---------- */
+function teacher(){
+  isHost=true;
+  show(`<h2>Siapkan soal</h2><p>Upload file Word (.docx) atau .txt, atau tempel soal di kotak.</p>
+  <input type=file id=f accept=".docx,.txt">
+  <textarea id=tx placeholder="Tempel soal di sini"></textarea>
+  <label>Waktu tiap soal (detik)<input type=number id=du value=20 min=5 max=180></label>
+  <label>Mode kuis<select id=mo><option value=sync>Serempak: semua murid saling menunggu</option><option value=self>Mandiri: tiap murid jalan sendiri tanpa menunggu</option><option value=adv>Petualangan: gerakkan karakter, lewati gerbang untuk membuka soal</option></select></label>
+  <div id=msg></div>
+  <button class=b onclick=makeRoom()>Buat room</button>
+  <details><summary>Format soal</summary><pre>1. Ibu kota Indonesia adalah...
+A. Bandung
+B. Jakarta
+C. Surabaya
+D. Medan
+Jawaban: B
+
+2. Hewan apa yang punya belalai?
+Jawaban: gajah</pre><p class=meta>Soal tanpa pilihan A-D jadi soal isian (teka-teki). Beberapa jawaban benar dipisah garis miring, contoh: gajah/elephant.</p></details>
+  <button class="b ghost" onclick=home()>Kembali</button>`);
+  $('#tx').oninput=preview;
+  $('#f').onchange=async e=>{
+    const f=e.target.files[0];if(!f)return;
+    try{
+      const t=/\.docx$/i.test(f.name)?(await mammoth.extractRawText({arrayBuffer:await f.arrayBuffer()})).value:await f.text();
+      $('#tx').value=t;preview();
+    }catch(x){$('#msg').textContent='File tidak bisa dibaca: '+x.message}
+  };
+}
+function preview(){const r=parse($('#tx').value),pg=r.filter(x=>x.o).length;$('#msg').textContent=r.length?`${r.length} soal terbaca (${pg} pilihan ganda, ${r.length-pg} isian)`:'Belum ada soal yang terbaca.'}
+function makeRoom(){
+  Q=parse($('#tx').value);mode=$('#mo').value;dur=Math.min(180,Math.max(5,+$('#du').value||20));
+  if(!Q.length){$('#msg').textContent='Belum ada soal yang terbaca. Cek format soal.';return}
+  openPeer();
+}
+function openPeer(){
+  const al='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let code='';for(let i=0;i<5;i++)code+=al[Math.floor(Math.random()*al.length)];
+  if(peer)peer.destroy();players={};
+  peer=new Peer('kuis-'+code);
+  peer.on('open',()=>{phase='lobby';lobby(code);clearInterval(posT);posT=setInterval(posCast,250)});
+  peer.on('error',e=>{if(e.type==='unavailable-id')openPeer();else $('#msg').textContent='Gagal membuat room: '+e.type});
+  peer.on('connection',c=>{
+    c.on('data',d=>hostData(c,d));
+    c.on('close',()=>{const p=players[c.tok];if(!p||p.conn!==c)return;p.off=true;if(phase==='lobby')lobbyList();if(phase==='q')checkAll();if(phase==='run')liveView();bcRos()});
+  });
+}
+let roomCode='';
+function lobby(code){
+  roomCode=code;
+  show(`<h2>Room siap</h2><p class=meta>Murid buka halaman ini, pilih "Saya murid", lalu masukkan kode:</p><div class=code>${code}</div><p class=meta>Mode: ${mode==='self'?'mandiri (tiap murid jalan sendiri)':mode==='adv'?'petualangan (murid jalan ke gerbang, bisa ganti karakter di lobby)':'serempak (semua jawab bersamaan)'}</p>
+  <div class=chips id=pl></div><div id=msg></div>
+  <button class=b onclick=startGame()>Mulai kuis (${Q.length} soal)</button>
+  <button class="b ghost" onclick=home()>Tutup room</button>`);
+  lobbyList();
+}
+function lobbyList(){const e=$('#pl');if(e){const a=Object.values(players).filter(p=>!p.off);e.innerHTML=a.length?a.map(p=>`<span>${pav(p)}${esc(p.name)}</span>`).join(''):'<span>Menunggu murid masuk…</span>'}}
+const send=(p,m)=>{try{p.conn.open&&p.conn.send(m)}catch(e){}};
+const bc=m=>Object.values(players).forEach(p=>!p.off&&send(p,m));
+const cleanAv=a=>[8,5,4].map((m,k)=>Array.isArray(a)?Math.max(0,Math.min(m-1,a[k]|0)):0);
+function bcRos(){if(mode==='adv')bc({t:'ros',r:Object.values(players).filter(p=>!p.off).map(p=>[p.id,p.name,p.av])})}
+function posCast(){
+  if(mode!=='adv')return;
+  const a=[];Object.values(players).forEach(p=>{if(p.dirty&&!p.off){a.push([p.id,p.x,p.y]);p.dirty=0}});
+  if(a.length)bc({t:'pos',a});
+}
+function hostData(c,d){
+  if(d.t==='join'){
+    const n=String(d.name||'').trim().slice(0,16)||'Murid';
+    let p=d.tok&&players[d.tok];
+    if(!p)p=Object.values(players).find(x=>x.off&&x.name===n);
+    if(p){ /* murid lama masuk lagi: pulihkan skor dan posisinya */
+      const old=p.conn;p.conn=c;p.off=false;c.tok=p.tok;
+      if(old&&old!==c)try{old.close()}catch(e){}
+      play('join');resync(p);
+      if(phase==='lobby')lobbyList();else if(phase==='run')liveView();else if(phase==='q')checkAll();
+      bcRos();return;
+    }
+    if(!(phase==='lobby'||(mode!=='sync'&&phase==='run'))){c.send({t:'err',m:'Kuis sudah dimulai. Kalau tadi kamu sudah ikut, tunggu beberapa detik lalu masuk lagi dengan nama yang sama.'});return}
+    const names=Object.values(players).map(x=>x.name);let k=n,i=2;while(names.includes(k))k=n+' '+i++;
+    const tok=d.tok||c.peer;
+    players[tok]={tok,id:++pid,name:k,score:0,conn:c,ans:null,idx:0,av:cleanAv(d.av),x:100,y:160};c.tok=tok;
+    play('join');resync(players[tok]);
+    if(phase==='lobby')lobbyList();else liveView();
+    bcRos();return;
+  }
+  const p=players[c.tok];
+  if(!p||p.conn!==c)return;
+  if(d.t==='ans'){
+    if(mode==='sync'){
+      if(phase!=='q'||p.ans!=null||d.i!==cur)return;
+      p.ans=d.a;p.at=Date.now();checkAll();
+    }else if(phase==='run'&&p.wait&&d.i===p.idx)evalSelf(p,d.a);
+  }else if(d.t==='next'&&mode!=='sync'&&p.rev&&phase==='run'){p.rev=false;sendQ(p)}
+  else if(d.t==='gate'&&mode==='adv'&&phase==='run'&&!p.wait&&d.i===p.idx&&p.idx<Q.length){p.rev=false;sendQ(p)}
+  else if(d.t==='pos'&&mode==='adv'){p.x=+d.x||0;p.y=+d.y||0;p.dirty=1}
+  else if(d.t==='av'&&mode==='adv'&&phase!=='end'){p.av=cleanAv(d.av);if(phase==='lobby')lobbyList();bcRos()}
+}
+function resync(p){
+  const adv=mode==='adv',info={name:p.name,adv:adv?1:0,id:p.id,av:p.av,n:Q.length};
+  if(phase==='lobby')return send(p,{t:'wait',...info});
+  if(phase==='end'){const b=board();return send(p,{t:'end',rank:b.indexOf(p)+1,total:b.length,score:p.score})}
+  if(mode==='sync'){
+    if(phase==='q'){
+      const x=Q[cur],rem=Math.max(1,Math.ceil(dur-(Date.now()-t0)/1000));
+      if(p.ans!=null)send(p,{t:'sent'});else send(p,{t:'q',i:cur,n:Q.length,q:x.q,o:x.o,dur:rem});
+    }else if(phase==='r'&&p.lastRev)send(p,p.lastRev);
+    else send(p,{t:'wait',name:p.name});
+  }else if(adv){
+    send(p,{t:'world',...info,on:1,idx:p.idx});
+    if(p.wait){const x=Q[p.idx],rem=Math.max(1,Math.ceil(dur-(Date.now()-p.qt)/1000));send(p,{t:'q',m:'adv',i:p.idx,n:Q.length,q:x.q,o:x.o,dur:rem})}
+    else if(p.idx>=Q.length)sendQ(p);
+  }else{
+    if(p.rev&&p.lastRev)send(p,p.lastRev);
+    else if(p.wait){const x=Q[p.idx],rem=Math.max(1,Math.ceil(dur-(Date.now()-p.qt)/1000));send(p,{t:'q',m:'self',i:p.idx,n:Q.length,q:x.q,o:x.o,dur:rem})}
+    else sendQ(p);
+  }
+}
+function checkAll(){
+  const a=Object.values(players).filter(p=>!p.off),n=a.filter(p=>p.ans!=null).length,e=$('#cnt');
+  if(e)e.textContent=`${n} dari ${a.length} sudah menjawab`;
+  if(a.length&&n===a.length)endQ();
+}
+function startGame(){
+  if(!Object.keys(players).length){$('#msg').textContent='Belum ada murid yang masuk.';return}
+  play('start');
+  if(mode!=='sync'){phase='run';Object.values(players).forEach(p=>{p.idx=0;p.rev=false;p.done=false;if(mode==='self')sendQ(p)});if(mode==='adv')bc({t:'go'});liveView();return}
+  cur=-1;nextQ();
+}
+function sendQ(p){
+  if(p.idx>=Q.length){p.done=true;p.wait=false;const b=board();send(p,{t:'done',rank:b.indexOf(p)+1,total:b.length,score:p.score});liveView();return}
+  const x=Q[p.idx];p.wait=true;p.qt=Date.now();
+  send(p,{t:'q',m:mode,i:p.idx,n:Q.length,q:x.q,o:x.o,dur});
+}
+function evalSelf(p,a){
+  const x=Q[p.idx],el=(Date.now()-p.qt)/1000,ok=a!=null&&el<=dur+3&&check(x,a);
+  let gain=0;p.wait=false;p.rev=true;
+  if(ok){gain=500+Math.round(500*Math.max(0,dur-el)/dur);p.score+=gain}
+  p.idx++;
+  const b=board();
+  p.lastRev={t:'rev',self:1,ok,got:a!=null,gain,score:p.score,rank:b.indexOf(p)+1,total:b.length,right:rightText(x),idx:p.idx,last:p.idx>=Q.length};send(p,p.lastRev);
+  liveView();
+}
+function liveView(){
+  if(!isHost||phase!=='run')return;
+  const b=board(),act=b.filter(p=>!p.off),all=act.length&&act.every(p=>p.done);
+  show(`<h2>Kuis berjalan</h2><p class=meta>Mode ${mode==='adv'?'petualangan':'mandiri'} · kode room <b>${roomCode}</b>${all?' · semua murid sudah selesai':''}</p>
+  ${b.map((p,i)=>`<div class=row><span>${i+1}. ${pav(p)}${esc(p.name)}${p.off?' (terputus)':''}</span><span>${p.done?'selesai':p.idx+'/'+Q.length} · <b>${p.score}</b></span></div>`).join('')}
+  <button class=b onclick=finish()>Akhiri kuis dan tampilkan juara</button>`);
+}
+function nextQ(){
+  cur++;if(cur>=Q.length)return finish();
+  phase='q';Object.values(players).forEach(p=>p.ans=null);t0=Date.now();lastSec=-1;play('q');
+  const x=Q[cur];bc({t:'q',i:cur,n:Q.length,q:x.q,o:x.o,dur});
+  show(`<div class=bar><i id=bar></i></div><p class=meta>Soal ${cur+1} dari ${Q.length} · sisa <b id=tl>${dur}</b> detik</p>
+  <h2>${esc(x.q)}</h2>${x.o?`<div class=opts>${x.o.map((o,k)=>`<div class="opt c${k}"><b>${A[k]}</b>${esc(o)}</div>`).join('')}</div>`:'<p class=meta>Soal isian: murid mengetik jawabannya.</p>'}
+  <p class=big id=cnt></p><button class="b ghost" onclick=endQ()>Akhiri soal sekarang</button>`);
+  clearInterval(timer);timer=setInterval(tick,250);checkAll();
+}
+function tick(){
+  const left=Math.max(0,dur-(Date.now()-t0)/1000),s=Math.ceil(left);
+  const b=$('#bar');if(b)b.style.width=left/dur*100+'%';
+  const l=$('#tl');if(l)l.textContent=s;
+  if(s!==lastSec){lastSec=s;if(s>0&&s<=5)play('tick')}
+  if(left<=0){clearInterval(timer);if(isHost)endQ();else if(mode!=='sync'&&!answered)ans(null)}
+}
+const board=()=>Object.values(players).sort((a,b)=>b.score-a.score);
+function endQ(){
+  if(phase!=='q')return;clearInterval(timer);phase='r';
+  const x=Q[cur];
+  Object.values(players).forEach(p=>{
+    p.ok=p.ans!=null&&check(x,p.ans);p.gain=0;
+    if(p.ok){p.gain=500+Math.round(500*Math.max(0,dur-(p.at-t0)/1000)/dur);p.score+=p.gain}
+  });
+  const b=board();
+  b.forEach((p,i)=>{p.lastRev={t:'rev',ok:p.ok,got:p.ans!=null,gain:p.gain,score:p.score,rank:i+1,total:b.length,right:rightText(x)};send(p,p.lastRev)});
+  const last=cur===Q.length-1;
+  show(`<p class=meta>Soal ${cur+1} dari ${Q.length}</p><h2>${esc(x.q)}</h2><p class="big good">${esc(rightText(x))}</p>
+  <p class=meta>${b.filter(p=>p.ok).length} dari ${b.length} murid menjawab benar</p>
+  <h2>Peringkat</h2>${b.slice(0,5).map((p,i)=>`<div class=row><span>${i+1}. ${esc(p.name)}</span><b>${p.score}</b></div>`).join('')}
+  <button class=b onclick=nextQ()>${last?'Lihat hasil akhir':'Soal berikutnya'}</button>`);
+}
+function finish(){
+  clearInterval(timer);phase='end';const b=board();
+  b.forEach((p,i)=>send(p,{t:'end',rank:i+1,total:b.length,score:p.score}));
+  play('end');
+  show(`<h1>Selesai!</h1><h2>Juara kuis</h2>${b.slice(0,5).map((p,i)=>`<div class=row><span>${['🥇','🥈','🥉'][i]||i+1+'.'} ${esc(p.name)}</span><b>${p.score}</b></div>`).join('')}
+  <button class=b onclick=teacher()>Kuis baru</button><button class="b ghost" onclick=home()>Beranda</button>`);
+}
+
+/* ---------- Murid ---------- */
+function student(){
+  isHost=false;
+  show(`<h2>Gabung kuis</h2><input id=cd placeholder="Kode room" maxlength=5 autocapitalize=characters autocomplete=off>
+  <input id=nm placeholder="Namamu" maxlength=16 autocomplete=off><div id=msg></div>
+  <button class=b onclick=join()>Masuk</button><button class="b ghost" onclick=home()>Kembali</button>`);
+}
+/* Sesi murid disimpan di perangkat supaya bisa masuk lagi dengan skor yang sama */
+function loadSess(){try{const r=JSON.parse(localStorage.kuisSess);if(r&&Date.now()-r.at<144e5)return r}catch(e){}return null}
+function saveSess(){if(!sess)return;try{sess.at=Date.now();localStorage.kuisSess=JSON.stringify(sess)}catch(e){}}
+function clearSess(){sess=null;over=true;clearTimeout(retry);try{localStorage.removeItem('kuisSess')}catch(e){}}
+function leave(){clearSess();home()}
+function join(){
+  const code=$('#cd').value.trim().toUpperCase(),name=$('#nm').value.trim();
+  if(!code||!name){$('#msg').textContent='Isi kode room dan namamu.';return}
+  $('#msg').textContent='Menghubungkan…';
+  sess={code,name,av:myAv,tok:Math.random().toString(36).slice(2)+Date.now().toString(36)};
+  over=false;joined=false;tries=0;saveSess();connect();
+}
+function resume(){
+  sess=loadSess();if(!sess)return home();
+  myAv=sess.av||myAv;over=false;joined=true;tries=0;connect();
+  show(`<h2>Menghubungkan ke guru…</h2><button class="b ghost" onclick=leave()>Keluar dari kuis</button>`);
+}
+function connect(){
+  const gen=++G;clearTimeout(retry);clearInterval(timer);
+  if(peer)try{peer.destroy()}catch(e){}
+  peer=new Peer();
+  const lost=m=>{
+    if(gen!==G||over)return;
+    if(!joined){clearSess();const e=$('#msg');if(e)e.textContent=m;return}
+    if(++tries>40){clearSess();show('<h2>Tidak bisa terhubung ke guru</h2><button class=b onclick=home()>Beranda</button>');return}
+    show(`<h2>Koneksi terputus</h2><p>Menghubungkan ulang ke guru…</p><button class="b ghost" onclick=leave()>Keluar dari kuis</button>`);
+    clearTimeout(retry);retry=setTimeout(connect,2000);
+  };
+  peer.on('error',e=>lost(e.type==='peer-unavailable'?'Room tidak ditemukan. Cek kodenya.':'Koneksi bermasalah: '+e.type));
+  peer.on('open',()=>{
+    if(gen!==G)return;
+    const hc=hostConn=peer.connect('kuis-'+sess.code,{reliable:true});
+    hc.on('open',()=>hc.send({t:'join',name:sess.name,tok:sess.tok,av:myAv}));
+    hc.on('data',d=>{if(gen===G)sdata(d)});
+    hc.on('close',()=>lost('Koneksi terputus'));
+  });
+}
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden&&sess&&!over&&joined&&!isHost&&!(hostConn&&hostConn.open)){tries=0;connect()}
+});
+function sdata(d){
+  if(d.t!=='err'){joined=true;saveSess()}
+  if(d.t==='err'){clearSess();show(`<h2>${esc(d.m)}</h2><button class=b onclick=student()>Kembali</button>`)}
+  else if(d.t==='wait'&&d.adv)advStart(d);
+  else if(d.t==='world')advStart(d);
+  else if(d.t==='ros'&&W)advRos(d);
+  else if(d.t==='pos'&&W)advPos(d);
+  else if(d.t==='go'&&W)advGo();
+  else if(d.t==='wait'){myName=d.name;show(`<h2>Kamu sudah masuk</h2><p class=big>${esc(d.name)}</p><p>Menunggu guru memulai kuis…</p>`)}
+  else if(d.t==='q'){
+    mode=d.m==='adv'?'adv':d.m==='self'?'self':'sync';cur=d.i;dur=d.dur;answered=false;t0=Date.now();lastSec=-1;play('q');if(W&&mode==='adv'){W.lock=true;W.gt=0}
+    put(`<div class=bar><i id=bar></i></div><p class=meta>Soal ${d.i+1} dari ${d.n}</p><h2>${esc(d.q)}</h2>`+
+    (d.o?`<div class=opts>${d.o.map((o,k)=>`<button class="opt c${k}" onclick=ans(${k})><b>${A[k]}</b>${esc(o)}</button>`).join('')}</div>`
+    :`<input id=ia placeholder="Ketik jawabanmu" autocomplete=off><button class=b onclick=ans($('#ia').value)>Kirim jawaban</button>`));
+    clearInterval(timer);timer=setInterval(tick,250);
+  }
+  else if(d.t==='rev'&&mode==='adv'&&W)advRev(d);
+  else if(d.t==='rev'){
+    clearInterval(timer);play(d.ok?'ok':'bad');
+    show(`<p class="big ${d.ok?'good':'bad'}">${d.ok?'Benar!':d.got?'Belum tepat':'Waktu habis'}</p>
+    ${d.ok?`<p class=big>+${d.gain}</p>`:`<p>Jawaban yang benar: <b>${esc(d.right)}</b></p>`}
+    <div class=row><span>Skormu</span><b>${d.score}</b></div><div class=row><span>Peringkat</span><b>${d.rank} dari ${d.total}</b></div>
+    ${d.self?`<button class=b onclick=nextSelf()>${d.last?'Lihat hasil':'Soal berikutnya'}</button>`:'<p class=meta>Tunggu soal berikutnya…</p>'}`);
+  }
+  else if(d.t==='sent'){answered=true;clearInterval(timer);put(`<h2>Jawabanmu terkirim</h2><p>Menunggu teman-teman yang lain…</p>`)}
+  else if(d.t==='done'){
+    W=null;clearInterval(timer);play('end');
+    show(`<h1>Kamu sudah selesai!</h1><p class=big>Skor ${d.score}</p><div class=row><span>Peringkat sementara</span><b>${d.rank} dari ${d.total}</b></div>
+    <p class=meta>Peringkat bisa berubah sampai guru mengakhiri kuis.</p>`);
+  }
+  else if(d.t==='end'){
+    W=null;clearSess();clearInterval(timer);play('end');
+    show(`<h1>Selesai!</h1><p class=big>Peringkat ${d.rank} dari ${d.total}</p><div class=row><span>Skor akhir</span><b>${d.score}</b></div>
+    <button class=b onclick=home()>Beranda</button>`);
+  }
+}
+function nextSelf(){hostConn.send({t:'next'})}
+
+/* ---------- Mode petualangan: karakter, dunia, gerbang ---------- */
+const COL=['#ef476f','#ffd166','#06d6a0','#118ab2','#9b5de5','#f78c6b','#f4f1de','#2b2d42'],HAT=['Polos','Topi','Mahkota','Penyihir','Antena'],FACE=['Biasa','Senyum','Keren','Kaget'],OY=160,GX=i=>460+i*420,avc={};
+function drawChar(g,x,y,s,av,t,name){
+  g.save();g.translate(x,y);g.scale(s,s);
+  g.fillStyle='rgba(0,0,0,.25)';g.beginPath();g.ellipse(0,0,15,5,0,0,7);g.fill();
+  g.translate(0,-Math.abs(Math.sin(t*9))*4);
+  g.fillStyle=COL[av[0]];g.strokeStyle='#1d1d1d';g.lineWidth=2;
+  g.beginPath();g.ellipse(0,-22,14,20,0,0,7);g.fill();g.stroke();
+  g.fillStyle='#111';g.strokeStyle='#111';const f=av[2],h=av[1];
+  if(f===0)[-5,5].forEach(e=>{g.beginPath();g.arc(e,-28,2.5,0,7);g.fill()});
+  else if(f===1)[-5,5].forEach(e=>{g.beginPath();g.arc(e,-26,3.5,Math.PI,0);g.stroke()});
+  else if(f===2)g.fillRect(-11,-32,22,7);
+  else[-5,5].forEach(e=>{g.fillStyle='#fff';g.beginPath();g.arc(e,-28,4,0,7);g.fill();g.fillStyle='#111';g.beginPath();g.arc(e,-28,1.8,0,7);g.fill()});
+  g.beginPath();g.arc(0,-18,f===3?3:4,0,f===3?7:Math.PI);g.stroke();
+  if(h===1){g.fillStyle='#e63946';g.beginPath();g.arc(0,-38,13,Math.PI,0);g.fill();g.fillRect(3,-40,15,4)}
+  else if(h===2){g.fillStyle='#ffd166';g.beginPath();g.moveTo(-11,-38);g.lineTo(-11,-52);g.lineTo(-5,-45);g.lineTo(0,-54);g.lineTo(5,-45);g.lineTo(11,-52);g.lineTo(11,-38);g.fill()}
+  else if(h===3){g.fillStyle='#7b2cbf';g.beginPath();g.moveTo(-14,-38);g.lineTo(0,-66);g.lineTo(14,-38);g.fill();g.fillRect(-17,-40,34,4)}
+  else if(h===4){g.beginPath();g.moveTo(0,-41);g.lineTo(0,-54);g.stroke();g.fillStyle='#e63946';g.beginPath();g.arc(0,-56,4,0,7);g.fill()}
+  g.restore();
+  if(name){g.font='bold 11px sans-serif';g.textAlign='center';g.fillStyle='#fff';g.strokeStyle='rgba(0,0,0,.6)';g.lineWidth=3;g.strokeText(name,x,y-74*s);g.fillText(name,x,y-74*s)}
+}
+function avImg(av){const k=av.join();if(avc[k])return avc[k];const c=document.createElement('canvas');c.width=64;c.height=76;drawChar(c.getContext('2d'),32,70,1,av,0);return avc[k]=c.toDataURL()}
+const pav=p=>p.av&&mode==='adv'?`<img src="${avImg(p.av)}" width=24 style="vertical-align:middle"> `:'';
+function put(h){const o=$('#ov');if(mode==='adv'&&W&&o){o.innerHTML=h;o.style.display='block'}else show(h)}
+function hud(){const h=$('#hud');if(h&&W)h.textContent=W.on?`Gerbang ${Math.min(W.idx+1,W.n)} dari ${W.n}. Jalan ke gerbang yang menyala.`:'Jalan-jalan dulu dan ganti karakter. Geser jari di arena atau pakai tombol panah/WASD. Tunggu guru membuka gerbang.'}
+function czView(){
+  const e=$('#cz');if(!e)return;
+  const row=(L,a,k)=>`<p class=meta>${L}</p><div class=chips>${a.map((v,i)=>k?`<button class="chp${myAv[k]===i?' sel':''}" onclick=setAv(${k},${i})>${v}</button>`:`<button class="sw${myAv[0]===i?' sel':''}" style="background:${v}" aria-label="Warna ${i+1}" onclick=setAv(0,${i})></button>`).join('')}</div>`;
+  e.innerHTML=`<h2>Karakter kamu</h2><img src="${avImg(myAv)}" width=64>${row('Warna',COL,0)}${row('Topi',HAT,1)}${row('Wajah',FACE,2)}`;
+}
+function setAv(k,v){myAv[k]=v;if(sess){sess.av=myAv;saveSess()}try{hostConn.send({t:'av',av:myAv})}catch(e){}czView()}
+function advStart(d){
+  myId=d.id;myAv=d.av||myAv;if(sess){sess.av=myAv;saveSess()}
+  const on=d.on?1:0,idx=d.idx||0,old=W&&$('#cv')?W:null;
+  W=old||{keys:{},others:{},ros:{},an:[],last:0,px:100,py:OY};
+  Object.assign(W,{n:d.n,idx,on,lock:false,gt:0,gOpen:on?Math.min(d.n,idx+1):0});
+  if(!old){
+    W.px=idx?GX(idx-1)+60:100;
+    show(`<p class=meta id=hud></p><canvas id=cv width=480 height=320></canvas><div id=ov></div><div id=cz></div>`);
+    const cv=$('#cv');
+    cv.onpointerdown=e=>{W.jo=[e.clientX,e.clientY];cv.setPointerCapture&&cv.setPointerCapture(e.pointerId)};
+    cv.onpointermove=e=>{if(!W||!W.jo)return;const dx=(e.clientX-W.jo[0])/35,dy=(e.clientY-W.jo[1])/35;W.joy=Math.hypot(dx,dy)<.25?null:{x:Math.max(-1,Math.min(1,dx)),y:Math.max(-1,Math.min(1,dy))}};
+    cv.onpointerup=cv.onpointercancel=()=>{if(W)W.jo=W.joy=null};
+    const gen=++loopG,f=ts=>{if(gen!==loopG||!W||!$('#cv'))return;const dt=Math.min(.05,(ts-(W.last||ts))/1000);W.last=ts;advMove(dt);advDraw(ts/1000);requestAnimationFrame(f)};
+    requestAnimationFrame(f);
+  }
+  const o=$('#ov');if(o)o.style.display='none';
+  hud();if(on){const z=$('#cz');if(z)z.innerHTML=''}else czView();
+}
+function blocked(x,y){for(let i=0;i<W.n;i++){if(Math.abs(x-GX(i))<18&&!(i<W.gOpen&&Math.abs(y-OY)<46))return true}return false}
+function advMove(dt){
+  const k=W.keys;let dx=(k.ArrowRight||k.d?1:0)-(k.ArrowLeft||k.a?1:0),dy=(k.ArrowDown||k.s?1:0)-(k.ArrowUp||k.w?1:0);
+  if(W.joy){dx=W.joy.x;dy=W.joy.y}
+  if(W.lock&&W.gt&&Date.now()-W.gt>4000){W.lock=false;W.gt=0}
+  W.mv=!!(dx||dy)&&!W.lock;if(!W.mv)return;
+  const m=Math.hypot(dx,dy);if(m>1){dx/=m;dy/=m}
+  const v=190*dt,nx=W.px+dx*v,ny=Math.max(40,Math.min(290,W.py+dy*v));
+  if(!blocked(nx,W.py))W.px=Math.max(20,nx);
+  if(!blocked(W.px,ny))W.py=ny;
+  W.moved=1;
+  const g=W.idx;
+  if(g<W.n&&g<W.gOpen&&W.px>GX(g)){W.lock=true;W.gt=Date.now();try{hostConn.send({t:'gate',i:g})}catch(e){}}
+}
+function advDraw(t){
+  const g=$('#cv').getContext('2d'),cx=Math.max(0,W.px-170);
+  g.fillStyle='#5aa469';g.fillRect(0,0,480,320);
+  g.fillStyle='#62b073';for(let x=-(cx%120);x<480;x+=120)g.fillRect(x,0,60,320);
+  for(let i=Math.floor(cx/100);i<cx/100+6;i++){const h=(i*2654435761>>>0)%997,tx=i*100+h%60-cx,ty=i%2?22:304;g.fillStyle='#6b4226';g.fillRect(tx-4,ty-4,8,16);g.fillStyle='#2d6a4f';g.beginPath();g.arc(tx,ty-12,16,0,7);g.fill()}
+  g.textAlign='center';
+  for(let i=0;i<W.n;i++){
+    const gx=GX(i)-cx;if(gx<-40||gx>520)continue;
+    const a0=W.an[i]||0,a=W.an[i]=a0+((i<W.gOpen?1:0)-a0)*.08,dh=46*(1-a);
+    g.fillStyle='#8d99ae';g.fillRect(gx-10,0,20,OY-46);g.fillRect(gx-10,OY+46,20,320-OY-46);
+    g.fillStyle=i<W.idx?'#6c757d':'#e9c46a';g.fillRect(gx-8,OY-46,16,dh);g.fillRect(gx-8,OY+46-dh,16,dh);
+    g.fillStyle='#fff';g.font='bold 12px sans-serif';g.fillText(i<W.idx?'✓':'Gerbang '+(i+1),gx,OY-54);
+    if(i===W.idx&&i<W.gOpen){g.strokeStyle='rgba(255,255,255,'+(.5+.5*Math.sin(t*6))+')';g.lineWidth=3;g.strokeRect(gx-16,OY-46,32,92)}
+  }
+  for(const id in W.others){
+    const o=W.others[id],r=W.ros[id];if(!r)continue;
+    const mv=Math.abs(o.tx-o.x)+Math.abs(o.ty-o.y)>2;o.x+=(o.tx-o.x)*.25;o.y+=(o.ty-o.y)*.25;
+    const sx=o.x-cx;if(sx>-40&&sx<520)drawChar(g,sx,o.y,1,r.av,mv?t:0,r.name);
+  }
+  drawChar(g,W.px-cx,W.py,1,myAv,W.mv?t:0,sess?sess.name:'');
+}
+function advRos(d){const m={};d.r.forEach(([id,name,av])=>{if(id!==myId)m[id]={name,av}});W.ros=m;for(const id in W.others)if(!m[id])delete W.others[id]}
+function advPos(d){d.a.forEach(([id,x,y])=>{if(id===myId)return;const o=W.others[id];if(o){o.tx=x;o.ty=y}else W.others[id]={x,y,tx:x,ty:y}})}
+function advGo(){W.on=1;W.gOpen=Math.min(W.n,W.idx+1);play('start');hud();const z=$('#cz');if(z)z.innerHTML=''}
+function advRev(d){
+  clearInterval(timer);play(d.ok?'ok':'bad');W.idx=d.idx;W.gOpen=Math.min(W.n,W.idx+1);
+  const o=$('#ov');if(!o)return;
+  o.innerHTML=`<p class="big ${d.ok?'good':'bad'}">${d.ok?'Benar!':d.got?'Belum tepat':'Waktu habis'}</p>${d.ok?`<p class=big>+${d.gain}</p>`:`<p>Jawaban yang benar: <b>${esc(d.right)}</b></p>`}<div class=row><span>Skormu</span><b>${d.score}</b></div><div class=row><span>Peringkat</span><b>${d.rank} dari ${d.total}</b></div>${d.last?'<button class=b onclick=nextSelf()>Lihat hasil</button>':''}`;
+  o.style.display='block';
+  if(!d.last)setTimeout(()=>{const e=$('#ov');if(W&&e&&W.lock){e.style.display='none';W.lock=false;hud()}},2200);
+}
+const kb=v=>e=>{if(!W||(e.target.tagName||'')==='INPUT')return;const k=e.key.length>1?e.key:e.key.toLowerCase();W.keys[k]=v;if(k.startsWith('Arrow'))e.preventDefault()};
+document.addEventListener('keydown',kb(1));document.addEventListener('keyup',kb(0));
+setInterval(()=>{if(W&&W.moved&&hostConn&&hostConn.open){try{hostConn.send({t:'pos',x:Math.round(W.px),y:Math.round(W.py)})}catch(e){}W.moved=0}},200);
+let myId=0;
+
+function ans(a){
+  if(answered||!hostConn||!hostConn.open)return;
+  if(typeof a==='string'&&!a.trim())return;
+  answered=true;clearInterval(timer);
+  hostConn.send({t:'ans',i:cur,a:typeof a==='string'?a.trim():a});
+  put(`<h2>Jawabanmu terkirim</h2><p>Menunggu teman-teman yang lain…</p>`);
+}
+$('#mu').textContent=mute?'🔇':'🔊';
+home();
+</script></body></html>
